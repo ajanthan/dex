@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/coreos/dex/storage"
+
+	"github.com/kylelemons/godebug/pretty"
 )
 
 var neverExpire = time.Now().Add(time.Hour * 24 * 365 * 100)
@@ -92,4 +94,61 @@ func testCreateRefresh(t *testing.T, s storage.Storage) {
 		t.Errorf("after deleting refresh expected storage.ErrNotFound, got %v", err)
 	}
 
+}
+
+func mustBeErrNotFound(t *testing.T, kind string, err error) {
+	switch {
+	case err == nil:
+		t.Errorf("deleting non-existant %s should return an error", kind)
+	case err != storage.ErrNotFound:
+		t.Errorf("deleting %s expected storage.ErrNotFound, got %v", kind, err)
+	}
+}
+
+func testCreateClient(t *testing.T, s storage.Storage) {
+	id := storage.NewID()
+	c := storage.Client{
+		ID:           id,
+		Secret:       "foobar",
+		RedirectURIs: []string{"foo://bar.com/", "https://auth.example.com"},
+		Name:         "dex client",
+		LogoURL:      "https://goo.gl/JIyzIC",
+	}
+	err := s.DeleteClient(id)
+	mustBeErrNotFound(t, "client", err)
+
+	if err := s.CreateClient(c); err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+
+	getAndCompare := func(id string, want storage.Client) {
+		gc, err := s.GetClient(id)
+		if err != nil {
+			t.Errorf("get client: %v", err)
+			return
+		}
+		if diff := pretty.Compare(c, gc); diff != "" {
+			t.Errorf("client retrieved from storage did not match: %s", diff)
+		}
+	}
+
+	getAndCompare(id, c)
+
+	newSecret := "barfoo"
+	err = s.UpdateClient(id, func(old storage.Client) (storage.Client, error) {
+		old.Secret = newSecret
+		return old, nil
+	})
+	if err != nil {
+		t.Errorf("update client: %v", err)
+	}
+	c.Secret = newSecret
+	getAndCompare(id, c)
+
+	if err := s.DeleteClient(id); err != nil {
+		t.Fatalf("delete client: %v", err)
+	}
+
+	_, err = s.GetClient(id)
+	mustBeErrNotFound(t, "client", err)
 }
