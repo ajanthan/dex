@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"github.com/coreos/dex/client"
 	"github.com/coreos/dex/client/manager"
 	"github.com/coreos/dex/connector"
@@ -37,10 +39,26 @@ func (d *dbDriver) NewClient(meta oidc.ClientMetadata) (*oidc.ClientCredentials,
 	return d.ciManager.New(cli, nil)
 }
 
-func (d *dbDriver) ConnectorConfigs() ([]connector.ConnectorConfig, error) {
-	return d.cfgRepo.All()
+func (d *dbDriver) ConnectorConfigs() ([]interface{}, error) {
+	var configs []interface{}
+	if configModels, err := d.cfgRepo.All(); err != nil {
+		return configs, err
+	} else {
+		for _, configModel := range configModels {
+			configs = append(configs, configModel)
+		}
+	}
+	return configs, nil
 }
 
-func (d *dbDriver) SetConnectorConfigs(cfgs []connector.ConnectorConfig) error {
-	return d.cfgRepo.Set(cfgs)
+func (d *dbDriver) SetConnectorConfigs(cfgs []interface{}) error {
+	b, marshalErr := json.Marshal(cfgs)
+	if marshalErr != nil {
+		return marshalErr
+	}
+	configs, readErr := connector.ReadConfigs(bytes.NewReader(b))
+	if readErr != nil {
+		return readErr
+	}
+	return d.cfgRepo.Set(configs)
 }
