@@ -51,19 +51,34 @@ func runSetConnectorConfigs(cmd *cobra.Command, args []string) int {
 		defer f.Close()
 		r = f
 	}
+	if isDBURLPresent() {
+		cfgs, err := connector.ReadConfigs(r)
+		if err != nil {
+			stderr("Unable to decode connector configs: %v", err)
+			return 1
+		}
+		dbConnector := getDBConnector()
+		if err := dbConnector.SetConnectorConfigs(cfgs); err != nil {
+			stderr(err.Error())
+			return 1
+		}
 
-	cfgs, err := readConfigs(r)
-	if err != nil {
-		stderr("Unable to decode connector configs: %v", err)
-		return 1
+		fmt.Printf("Saved %d connector config(s)\n", len(cfgs))
+	} else {
+		cfgs, err := readConfigs(r)
+		if err != nil {
+			stderr("Unable to decode connector configs: %v", err)
+			return 1
+		}
+		adminAPIConnector := getAdminAPIConnector()
+		if err := adminAPIConnector.SetConnectorConfigs(cfgs); err != nil {
+			stderr(err.Error())
+			return 1
+		}
+
+		fmt.Printf("Saved %d connector config(s)\n", len(cfgs))
 	}
 
-	if err := getDriver().SetConnectorConfigs(cfgs); err != nil {
-		stderr(err.Error())
-		return 1
-	}
-
-	fmt.Printf("Saved %d connector config(s)\n", len(cfgs))
 	return 0
 }
 
@@ -72,32 +87,39 @@ func runGetConnectorConfigs(cmd *cobra.Command, args []string) int {
 		stderr("Provide zero arguments.")
 		return 2
 	}
-
-	cfgs, err := getDriver().ConnectorConfigs()
-	if err != nil {
-		stderr("Unable to retrieve connector configs: %v", err)
-		return 1
-	}
-
-	fmt.Printf("Found %d connector config(s)\n", len(cfgs))
-
-	for _, cfg := range cfgs {
-		switch typedCFG := cfg.(type) {
-		case map[string]interface{}:
-
-			id := typedCFG["id"].(string)
-			fmt.Println()
-			fmt.Printf("ID:   %v\n", id)
-			for key, val := range typedCFG {
-				fmt.Printf("\t%s: %v\n", key, val)
-			}
-		case connector.ConnectorConfig:
-
-			fmt.Println()
-			fmt.Printf("ID:   %v\n", typedCFG.ConnectorID())
-			fmt.Printf("Type: %v\n", typedCFG.ConnectorType())
+	if isDBURLPresent() {
+		dbConnector := getDBConnector()
+		cfgs, err := dbConnector.ConnectorConfigs()
+		if err != nil {
+			stderr("Unable to retrieve connector configs: %v", err)
+			return 1
 		}
 
+		fmt.Printf("Found %d connector config(s)\n", len(cfgs))
+		for _, cfg := range cfgs {
+			fmt.Println()
+			fmt.Printf("ID:   %v\n", cfg.ConnectorID())
+			fmt.Printf("Type: %v\n", cfg.ConnectorType())
+		}
+	} else {
+		adminAPIConnector := getAdminAPIConnector()
+		cfgs, err := adminAPIConnector.ConnectorConfigs()
+		if err != nil {
+			stderr("Unable to retrieve connector configs: %v", err)
+			return 1
+		}
+
+		fmt.Printf("Found %d connector config(s)\n", len(cfgs))
+		for _, cfg := range cfgs {
+			cfgMap := cfg.(map[string]interface{})
+			fmt.Println()
+			fmt.Printf("ID:   %v\n", cfgMap["id"])
+			for configKey, configVal := range cfgMap {
+				if configKey != "id" {
+					fmt.Printf("%s: %s\n", configKey, configVal)
+				}
+			}
+		}
 	}
 
 	return 0

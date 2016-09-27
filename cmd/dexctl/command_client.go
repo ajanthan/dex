@@ -36,16 +36,29 @@ func runNewClient(cmd *cobra.Command, args []string) int {
 		}
 		redirectURLs[i] = *u
 	}
+	var clientCredential *oidc.ClientCredentials
+	if isDBURLPresent() {
+		dbConnector := getDBConnector()
+		if cc, err := dbConnector.NewClient(oidc.ClientMetadata{RedirectURIs: redirectURLs}); err != nil {
+			stderr("Failed creating new client: %v", err)
+			return 1
+		} else {
+			clientCredential = cc
+		}
 
-	cc, err := getDriver().NewClient(oidc.ClientMetadata{RedirectURIs: redirectURLs})
-	if err != nil {
-		stderr("Failed creating new client: %v", err)
-		return 1
+	} else {
+		adminAPIConnector := getAdminAPIConnector()
+		if cc, err := adminAPIConnector.NewClient(oidc.ClientMetadata{RedirectURIs: redirectURLs}); err != nil {
+			stderr("Failed creating new client: %v", err)
+			return 1
+		} else {
+			clientCredential = cc
+		}
 	}
 
 	stdout("# Added new client:")
-	stdout("DEX_APP_CLIENT_ID=%s", cc.ID)
-	stdout("DEX_APP_CLIENT_SECRET=%s", cc.Secret)
+	stdout("DEX_APP_CLIENT_ID=%s", clientCredential.ID)
+	stdout("DEX_APP_CLIENT_SECRET=%s", clientCredential.Secret)
 	for i, u := range redirectURLs {
 		stdout("DEX_APP_REDIRECTURL_%d=%s", i, u.String())
 	}
