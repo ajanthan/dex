@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"io/ioutil"
 	"net/http"
 	"time"
 
@@ -9,25 +12,40 @@ import (
 	"github.com/coreos/go-oidc/oidc"
 )
 
-type AdminAPIDriver struct {
+type AdminAPIConnector struct {
 	client  *http.Client
 	baseURL string
 	apiKey  string
 }
 
-func newAdminAPIDriver(adminApiURL string, adminAPIKey string) (driver, error) {
+func newAdminAPIConnector(adminApiURL string, adminAPIKey string, caFile string) (*AdminAPIConnector, error) {
+	adminAPIConnector := &AdminAPIConnector{baseURL: adminApiURL}
+	var transport *http.Transport
+	if len(caFile) != 0 {
+		caCert, err := ioutil.ReadFile(caFile)
+		if err != nil {
+			return adminAPIConnector, err
+		}
+		caCertPool := x509.NewCertPool()
+		caCertPool.AppendCertsFromPEM(caCert)
+
+		tlsConfig := &tls.Config{
+			RootCAs: caCertPool,
+		}
+		tlsConfig.BuildNameToCertificate()
+		transport = &http.Transport{TLSClientConfig: tlsConfig}
+	} else {
+		transport = &http.Transport{}
+	}
 	apiClient := &http.Client{
-		Transport: adminAPITransport{secret: adminAPIKey},
+		Transport: newAdminAPITransport(adminAPIKey, transport),
 		Timeout:   10 * time.Second,
 	}
-	adminAPIDriver := &AdminAPIDriver{
-		baseURL: adminApiURL,
-		client:  apiClient,
-	}
-	return adminAPIDriver, nil
+	adminAPIConnector.client = apiClient
+	return adminAPIConnector, nil
 }
 
-func (d *AdminAPIDriver) NewClient(meta oidc.ClientMetadata) (*oidc.ClientCredentials, error) {
+func (d *AdminAPIConnector) NewClient(meta oidc.ClientMetadata) (*oidc.ClientCredentials, error) {
 	if err := meta.Valid(); err != nil {
 		return nil, err
 	}
@@ -54,7 +72,7 @@ func (d *AdminAPIDriver) NewClient(meta oidc.ClientMetadata) (*oidc.ClientCreden
 	return credential, nil
 }
 
-func (d *AdminAPIDriver) ConnectorConfigs() ([]interface{}, error) {
+func (d *AdminAPIConnector) ConnectorConfigs() ([]interface{}, error) {
 	var connectors []interface{}
 	service, err := adminschema.NewWithBasePath(d.client, d.baseURL)
 	if err != nil {
@@ -68,7 +86,7 @@ func (d *AdminAPIDriver) ConnectorConfigs() ([]interface{}, error) {
 	return connectors, nil
 }
 
-func (d *AdminAPIDriver) SetConnectorConfigs(cfgs []interface{}) error {
+func (d *AdminAPIConnector) SetConnectorConfigs(cfgs []interface{}) error {
 	service, err := adminschema.NewWithBasePath(d.client, d.baseURL)
 	if err != nil {
 		return nil
@@ -82,9 +100,17 @@ func (d *AdminAPIDriver) SetConnectorConfigs(cfgs []interface{}) error {
 
 type adminAPITransport struct {
 	secret string
+	rt     http.RoundTripper
 }
 
+func newAdminAPITransport(apiSecret string, roundTripper http.RoundTripper) adminAPITransport {
+	adminTransport := adminAPITransport{secret: apiSecret, rt: roundTripper}
+	return adminTransport
+}
 func (a adminAPITransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if len(r.Header.Get("Authorization")) != 0 {
+		return a.rt.RoundTrip(r)
+	}
 	r.Header.Set("Authorization", a.secret)
-	return http.DefaultTransport.RoundTrip(r)
+	return a.rt.RoundTrip(r)
 }
