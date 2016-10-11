@@ -47,6 +47,9 @@ func main() {
 
 	adminListen := fs.String("admin-listen", "http://127.0.0.1:5557", "scheme, host and port for listening for administrative operation requests ")
 
+	certFile := fs.String("tls-cert-file", "", "the server's certificate file for TLS connection")
+	keyFile := fs.String("tls-key-file", "", "the server's private key file for TLS connection")
+
 	adminAPISecret := pflag.NewBase64(server.AdminAPISecretLength)
 	fs.Var(adminAPISecret, "admin-api-secret", fmt.Sprintf("A base64-encoded %d byte string which is used to protect the Admin API.", server.AdminAPISecretLength))
 
@@ -81,6 +84,15 @@ func main() {
 	adminURL, err := url.Parse(*adminListen)
 	if err != nil {
 		log.Fatalf("Unable to use --admin-listen flag: %v", err)
+	}
+	switch adminURL.Scheme {
+	case "http":
+	case "https":
+		if *certFile == "" || *keyFile == "" {
+			log.Fatalf("Must provide certificate file and private key file")
+		}
+	default:
+		log.Fatalf("Only 'http' and 'https' schemes are supported")
 	}
 
 	if len(keySecrets.BytesSlice()) == 0 {
@@ -162,7 +174,11 @@ func main() {
 
 	log.Infof("Binding to %s...", httpsrv.Addr)
 	go func() {
-		log.Fatal(httpsrv.ListenAndServe())
+		if adminURL.Scheme == "http" {
+			log.Fatal(httpsrv.ListenAndServe())
+		} else {
+			log.Fatal(httpsrv.ListenAndServeTLS(*certFile, *keyFile))
+		}
 	}()
 
 	gc.Run()
